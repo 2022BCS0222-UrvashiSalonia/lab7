@@ -1,0 +1,213 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "2022bcs0222urvashi/wine_predict_jenkins:latest"
+        CONTAINER_NAME = "test_inference_2022BCS0222"
+        API_PORT = "8000"
+    }
+
+    stages {
+
+        stage('Pull Image') {
+            steps {
+                script {
+                    echo "2022BCS0222: Pulling Docker image from Docker Hub..."
+                    sh "docker pull ${DOCKER_IMAGE}"
+                    echo "2022BCS0222: Image pulled successfully."
+                }
+            }
+        }
+
+        stage('Run Container') {
+            steps {
+                script {
+                    echo "2022BCS0222: Starting inference container..."
+                    sh """
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                        docker run -d \
+                            --name ${CONTAINER_NAME} \
+                            -p ${API_PORT}:${API_PORT} \
+                            ${DOCKER_IMAGE}
+                    """
+                    def containerIP = sh(
+                        script: "docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${CONTAINER_NAME}",
+                        returnStdout: true
+                    ).trim()
+                    env.API_URL = "http://${containerIP}:${API_PORT}"
+                    echo "2022BCS0222: Container started: ${CONTAINER_NAME}"
+                    echo "2022BCS0222: Container IP: ${containerIP}"
+                    echo "2022BCS0222: API URL: ${env.API_URL}"
+                }
+            }
+        }
+
+        stage('Wait for Service Readiness') {
+            steps {
+                script {
+                    echo "2022BCS0222: Waiting for API to be ready at ${env.API_URL}..."
+                    def maxRetries = 15
+                    def retries = 0
+                    def ready = false
+
+                    while (retries < maxRetries && !ready) {
+                        def response = sh(
+                            script: "curl -s -o /dev/null -w '%{http_code}' ${env.API_URL}/ || echo '000'",
+                            returnStdout: true
+                        ).trim()
+
+                        if (response == "200") {
+                            ready = true
+                            echo "2022BCS0222: API is ready! Status: ${response}"
+                        } else {
+                            echo "2022BCS0222: API not ready yet. Status: ${response}. Retry ${retries + 1}/${maxRetries}"
+                            sleep(2)
+                            retries++
+                        }
+                    }
+
+                    if (!ready) {
+                        error("2022BCS0222: API did not become ready within timeout. Pipeline FAILED.")
+                    }
+                }
+            }
+        }
+
+        stage('Send Valid Inference Request') {
+            steps {
+                script {
+                    echo "2022BCS0222: Sending valid inference request to ${env.API_URL}/predict..."
+
+                    def response = sh(
+                        script: """curl -s -w "\\nHTTP_STATUS:%{http_code}" \
+                            -X POST \
+                            -H "Content-Type: application/json" \
+                            -d '{"fixed_acidity":7.4,"volatile_acidity":0.70,"citric_acid":0.00,"residual_sugar":1.9,"chlorides":0.076,"free_sulfur_dioxide":11.0,"total_sulfur_dioxide":34.0,"density":0.9978,"pH":3.51,"sulphates":0.56,"alcohol":9.4}' \
+                            ${env.API_URL}/predict""",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "2022BCS0222: Raw response: ${response}"
+
+                    def parts = response.split("HTTP_STATUS:")
+                    def body = parts[0].trim()
+                    def httpStatus = parts[1].trim()
+
+                    echo "2022BCS0222: Response body: ${body}"
+                    echo "2022BCS0222: HTTP Status: ${httpStatus}"
+
+                    if (httpStatus != "200") {
+                        error("2022BCS0222: Valid request FAILED. Expected HTTP 200, got ${httpStatus}")
+                    }
+                    echo "2022BCS0222: ✓ HTTP Status check PASSED: ${httpStatus}"
+
+                    if (!body.contains("wine_quality")) {
+                        error("2022BCS0222: Valid request FAILED. 'wine_quality' field missing in response.")
+                    }
+                    echo "2022BCS0222: ✓ Prediction field check PASSED: 'wine_quality' found"
+
+                    def predMatch = body =~ /"wine_quality"\s*:\s*(\d+)/
+                    if (!predMatch) {
+                        error("2022BCS0222: Valid request FAILED. 'wine_quality' value is not numeric.")
+                    }
+                    echo "2022BCS0222: ✓ Numeric value check PASSED: wine_quality = ${predMatch[0][1]}"
+                    echo "2022BCS0222: ✓ ALL valid request validations PASSED"
+                }
+            }
+        }
+
+        stage('Send Invalid Request') {
+            steps {
+                script {
+                    echo "2022BCS0222: Sending invalid inference request..."
+
+                    def response = sh(
+                        script: """curl -s -w "\\nHTTP_STATUS:%{http_code}" \
+                            -X POST \
+                            -H "Content-Type: application/json" \
+                            -d '{"fixed_acidity":"not_a_number","volatile_acidity":"invalid"}' \
+                            ${env.API_URL}/predict""",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "2022BCS0222: Raw response: ${response}"
+
+                    def parts = response.split("HTTP_STATUS:")
+                    def body = parts[0].trim()
+                    def httpStatus = parts[1].trim()
+
+                    echo "2022BCS0222: Response body: ${body}"
+                    echo "2022BCS0222: HTTP Status: ${httpStatus}"
+
+                    if (httpStatus == "200") {
+                        error("2022BCS0222: Invalid request test FAILED. API should return error but returned 200.")
+                    }
+                    echo "2022BCS0222: ✓ Error response check PASSED: Got expected error status ${httpStatus}"
+
+                    if (!body.contains("detail") && !body.contains("error") && !body.contains("value")) {
+                        error("2022BCS0222: Invalid request test FAILED. Error message is not meaningful.")
+                    }
+                    echo "2022BCS0222: ✓ Meaningful error message check PASSED"
+                    echo "2022BCS0222: ✓ ALL invalid request validations PASSED"
+                }
+            }
+        }
+
+        stage('Stop Container') {
+            steps {
+                script {
+                    echo "2022BCS0222: Stopping and removing container..."
+                    sh """
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                    """
+                    def running = sh(
+                        script: "docker ps --filter name=${CONTAINER_NAME} --format '{{.Names}}'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (running) {
+                        error("2022BCS0222: Container still running after stop!")
+                    }
+                    echo "2022BCS0222: ✓ Container stopped and removed cleanly."
+                }
+            }
+        }
+
+        stage('Pipeline Result') {
+            steps {
+                script {
+                    echo "================================================"
+                    echo "2022BCS0222: PIPELINE RESULT SUMMARY"
+                    echo "================================================"
+                    echo "2022BCS0222: ✓ Stage 1 - Pull Image         : PASSED"
+                    echo "2022BCS0222: ✓ Stage 2 - Run Container      : PASSED"
+                    echo "2022BCS0222: ✓ Stage 3 - Service Readiness  : PASSED"
+                    echo "2022BCS0222: ✓ Stage 4 - Valid Request      : PASSED"
+                    echo "2022BCS0222: ✓ Stage 5 - Invalid Request    : PASSED"
+                    echo "2022BCS0222: ✓ Stage 6 - Stop Container     : PASSED"
+                    echo "================================================"
+                    echo "2022BCS0222: ALL VALIDATIONS PASSED - PIPELINE SUCCESS"
+                    echo "================================================"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "2022BCS0222: Post-build cleanup..."
+                sh "docker stop ${CONTAINER_NAME} || true"
+                sh "docker rm ${CONTAINER_NAME} || true"
+            }
+        }
+        success {
+            echo "2022BCS0222: Pipeline completed SUCCESSFULLY."
+        }
+        failure {
+            echo "2022BCS0222: Pipeline FAILED. Check logs above for details."
+        }
+    }
+}
