@@ -53,7 +53,7 @@ pipeline {
 
                     while (retries < maxRetries && !ready) {
                         def response = sh(
-                            script: "curl -s -o /dev/null -w '%{http_code}' ${env.API_URL}/ || echo '000'",
+                            script: "curl -s -o /dev/null -w '%{http_code}' '${env.API_URL}/predict?fixed_acidity=7.4&volatile_acidity=0.70&citric_acid=0.00&residual_sugar=1.9&chlorides=0.076&free_sulfur_dioxide=11.0&total_sulfur_dioxide=34.0&density=0.9978&pH=3.51&sulphates=0.56&alcohol=9.4' || echo '000'",
                             returnStdout: true
                         ).trim()
 
@@ -81,10 +81,7 @@ pipeline {
 
                     def response = sh(
                         script: """curl -s -w "\\nHTTP_STATUS:%{http_code}" \
-                            -X POST \
-                            -H "Content-Type: application/json" \
-                            -d '{"fixed_acidity":7.4,"volatile_acidity":0.70,"citric_acid":0.00,"residual_sugar":1.9,"chlorides":0.076,"free_sulfur_dioxide":11.0,"total_sulfur_dioxide":34.0,"density":0.9978,"pH":3.51,"sulphates":0.56,"alcohol":9.4}' \
-                            ${env.API_URL}/predict""",
+                            '${env.API_URL}/predict?fixed_acidity=7.4&volatile_acidity=0.70&citric_acid=0.00&residual_sugar=1.9&chlorides=0.076&free_sulfur_dioxide=11.0&total_sulfur_dioxide=34.0&density=0.9978&pH=3.51&sulphates=0.56&alcohol=9.4'""",
                         returnStdout: true
                     ).trim()
 
@@ -124,10 +121,7 @@ pipeline {
 
                     def response = sh(
                         script: """curl -s -w "\\nHTTP_STATUS:%{http_code}" \
-                            -X POST \
-                            -H "Content-Type: application/json" \
-                            -d '{"fixed_acidity":"not_a_number","volatile_acidity":"invalid"}' \
-                            ${env.API_URL}/predict""",
+                            '${env.API_URL}/predict?fixed_acidity=not_a_number&volatile_acidity=invalid'""",
                         returnStdout: true
                     ).trim()
 
