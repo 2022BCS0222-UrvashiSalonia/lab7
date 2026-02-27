@@ -100,7 +100,7 @@ pipeline {
                     }
                     echo "2022BCS0222: ✓ HTTP Status check PASSED: ${httpStatus}"
 
-                    if (!body.contains("wine_quality")) {
+                    if (!body.contains("nonexistent_field")) {
                         error("2022BCS0222: Valid request FAILED. 'wine_quality' field missing in response.")
                     }
                     echo "2022BCS0222: ✓ Prediction field check PASSED: 'wine_quality' found"
