@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "2022bcs0222urvashi/wine_predict_jenkins:latest"
+        DOCKER_IMAGE = "2022bcs0222urvashi/wine_predict_2022bcs0222:v1"
         CONTAINER_NAME = "test_inference_2022BCS0222"
         API_PORT = "8000"
     }
